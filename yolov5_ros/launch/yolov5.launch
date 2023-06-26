@@ -2,7 +2,7 @@
     <!-- Detection configuration -->
     <arg name="weights" default="$(find yolov5_ros)/src/yolov5/best.pt"/>
     <arg name="data" default="$(find yolov5_ros)/src/yolov5/data/data.yaml"/>
-    <arg name="confidence_threshold" default="0.6"/>
+    <arg name="confidence_threshold" default="0.75"/>
     <arg name="iou_threshold" default="0.45"/>
     <arg name="maximum_detections" default="1000"/>
     <arg name="device" default="cpu"/>
@@ -21,6 +21,10 @@
     <!-- ROS topics -->
     <arg name="input_image_topic" default="/camera_front/color/image_raw"/>
     <arg name="output_topic" default="/yolov5/detections"/>
+
+    <!--find depth topic-->
+    <arg name="depth_image_topic" default="/camera_front/depth/image_rect_raw"/>
+    <arg name="depth_output_topic" default="/yolov5/depth_img"/>    
 
     <!-- Optional topic (publishing annotated image) -->
     <arg name="publish_image" default="ture"/>
@@ -44,6 +48,10 @@
 
         <param name="input_image_topic" value="$(arg input_image_topic)"/>
         <param name="output_topic" value="$(arg output_topic)"/>
+
+        <param name="depth_image_topic" value="$(arg depth_image_topic)"/>
+        <param name="depth_output_topic" value="$(arg depth_output_topic)"/>
+
 
         <param name="view_image" value="$(arg view_image)"/>
 

@@ -24,6 +24,7 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 string Class
+float64 distance
 float64 probability
 int64 xmin
 int64 ymin
