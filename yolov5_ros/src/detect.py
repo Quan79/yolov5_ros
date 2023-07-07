@@ -82,19 +82,19 @@ class Yolov5Detector:
 
         if self.compressed_input:
             self.image_sub = rospy.Subscriber(
-                input_image_topic, CompressedImage, self.callback, queue_size=1
+                input_image_topic, CompressedImage, self.callback, queue_size=10
             )
         else:
             self.image_sub = rospy.Subscriber(
-                input_image_topic, Image, self.callback, queue_size=1
+                input_image_topic, Image, self.callback, queue_size=10
             )
 
         #Initialize subscriber to depth image topic 初始化订阅深度图像，
         #此处LAUNCH文件需要修改
         input_depth_type, input_depth_topic, _ = get_topic_type(rospy.get_param("~depth_image_topic"), blocking = True)
-        print(input_depth_type)
+        #print(input_depth_type)
         self.depth_image_sub = rospy.Subscriber(
-            input_depth_topic, Image, self.depth_callback, queue_size=1
+            input_depth_topic, Image, self.depth_callback, queue_size=10
         )
 
 
@@ -132,23 +132,24 @@ class Yolov5Detector:
             self.depth_image = np.nan_to_num(self.depth_image)  # Replace NaN values with 0
         except CvBridgeError as e:
             rospy.logerr('Error converting depth image: {}'.format(e))
-            return     
+            return  
+           
 
-    def filter(self, x, y, min_val, randnum):
-        distance_list = []
-        #mid_pos = [(box[0] + box[2])//2, (box[1] + box[3])//2] #确定索引深度的中心像素位置
-        #min_val = min(abs(box[2] - box[0]), abs(box[3] - box[1])) #确定深度搜索范围
-        #print(box)
-        for i in range(randnum):
-            bias = random.randint(-min_val//4, min_val//4)
-            dist = self.depth_image[int(y + bias), int(x + bias)]
-            if dist:
-                distance_list.append(dist)
-        distance_list = np.array(distance_list)
-        distance_list = np.sort(distance_list)[randnum//2-randnum//4:randnum//2+randnum//4] #冒泡排序+中值滤波
-    #print(distance_list, np.mean(distance_list))
-        distance = np.mean(distance_list)
-        return distance
+#    def filter(self, x, y, min_val, randnum):
+#        distance_list = []
+#        #mid_pos = [(box[0] + box[2])//2, (box[1] + box[3])//2] #确定索引深度的中心像素位置
+#        #min_val = min(abs(box[2] - box[0]), abs(box[3] - box[1])) #确定深度搜索范围
+#        #print(box)
+#        for i in range(randnum):
+#            bias = random.randint(-min_val//4, min_val//4)
+#            dist = self.depth_image[int(y + bias), int(x + bias)]
+#            if dist:
+#                distance_list.append(dist)
+#        distance_list = np.array(distance_list)
+#        distance_list = np.sort(distance_list)[randnum//2-randnum//4:randnum//2+randnum//4] #冒泡排序+中值滤波
+#    #print(distance_list, np.mean(distance_list))
+#        distance = np.mean(distance_list)
+#        return distance
 
 
     def preprocess(self, img):
@@ -215,12 +216,13 @@ class Yolov5Detector:
                 x_center = int((xyxy[0] + xyxy[2]) / 2)
                 y_center = int((xyxy[1] + xyxy[3]) / 2)
 
-                min_val = min(abs(xyxy[2] - xyxy[0]), abs(xyxy[3] - xyxy[1]))
+                #min_val = min(abs(xyxy[2] - xyxy[0]), abs(xyxy[3] - xyxy[1]))
 
-                # Add depth i   nformation to the bounding box
+                # Add depth information to the bounding box
                 if self.depth_image is not None:
-                    distance_bbc = self.filter(x_center, y_center, min_val, 24)
-                    bounding_box.distance = distance_bbc
+                    distance_bbc = self.depth_image[int (y_center), int (x_center)]
+                #    distance_bbc = self.filter(x_center, y_center, min_val, 24)
+                    bounding_box.distance = float ((distance_bbc) / 645)
 
                 # Fill in bounding box message
                 bounding_box.Class = self.names[c]
@@ -236,7 +238,7 @@ class Yolov5Detector:
                 # Annotate the image
                 if self.publish_image or self.view_image:  # Add bbox to image
                       # integer class
-                    label = f"{self.names[c]} {conf:.2f}"
+                    label = f"{self.names[c]} {conf:.2f} {bounding_box.distance}"
                     annotator.box_label(xyxy, label, color=colors(c, True))     
 
                 
