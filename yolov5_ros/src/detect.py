@@ -123,33 +123,46 @@ class Yolov5Detector:
         self.color_image = None
         self.depth_image = None
         
-     #深度callback函数
+
+    #深度callback函数
     def depth_callback(self, depth_image):
         try:
             # Convert depth image to numpy array
             cv_depth_image = self.bridge.imgmsg_to_cv2(depth_image, desired_encoding='passthrough')
             self.depth_image = np.array(cv_depth_image, dtype=np.float64)
             self.depth_image = np.nan_to_num(self.depth_image)  # Replace NaN values with 0
+                
+            # Apply depth image preprocessing
+            self.depth_image = preprocess_depth_image(self.depth_image)
+
         except CvBridgeError as e:
             rospy.logerr('Error converting depth image: {}'.format(e))
             return  
-           
 
-#    def filter(self, x, y, min_val, randnum):
-#        distance_list = []
-#        #mid_pos = [(box[0] + box[2])//2, (box[1] + box[3])//2] #确定索引深度的中心像素位置
-#        #min_val = min(abs(box[2] - box[0]), abs(box[3] - box[1])) #确定深度搜索范围
-#        #print(box)
-#        for i in range(randnum):
-#            bias = random.randint(-min_val//4, min_val//4)
-#            dist = self.depth_image[int(y + bias), int(x + bias)]
-#            if dist:
-#                distance_list.append(dist)
-#        distance_list = np.array(distance_list)
-#        distance_list = np.sort(distance_list)[randnum//2-randnum//4:randnum//2+randnum//4] #冒泡排序+中值滤波
-#    #print(distance_list, np.mean(distance_list))
-#        distance = np.mean(distance_list)
-#        return distance
+
+    def preprocess_depth_image(depth_image):
+        # Apply median filtering to the depth image
+        kernel_size = 5
+        filtered_depth_image = cv2.medianBlur(depth_image, kernel_size)
+
+        return filtered_depth_image
+
+
+    # def filter(self, x, y, min_val, randnum):
+    #     distance_list = []
+    #     #mid_pos = [(box[0] + box[2])//2, (box[1] + box[3])//2] #确定索引深度的中心像素位置
+    #     #min_val = min(abs(box[2] - box[0]), abs(box[3] - box[1])) #确定深度搜索范围
+    #     #print(box)
+    #     for i in range(randnum):
+    #         bias = random.randint(-min_val//4, min_val//4)
+    #         dist = self.depth_image[int(y + bias), int(x + bias)]
+    #         if dist:
+    #             distance_list.append(dist)
+    #     distance_list = np.array(distance_list)
+    #     distance_list = np.sort(distance_list)[randnum//2-randnum//4:randnum//2+randnum//4] #冒泡排序+中值滤波
+    # #print(distance_list, np.mean(distance_list))
+    #     distance = np.mean(distance_list)
+    #     return distance
 
 
     def preprocess(self, img):
@@ -166,6 +179,21 @@ class Yolov5Detector:
 
         return img, img0 
     
+    def convert_to_camera_coordinates(center_depth, center_x, center_y):
+        # Get camera parameters from camera_info topic
+        camera_info_topic = rospy.get_param("~camera_info_topic")
+        camera_info_msg = rospy.wait_for_message(camera_info_topic, CameraInfo)
+
+        # Get camera intrinsic matrix
+        K = np.array(camera_info_msg.K).reshape(3, 3)
+
+        # Convert center point to camera coordinates
+        center_point = np.array([center_x, center_y, 1])
+        inverse_K = np.linalg.inv(K)
+        center_point_camera = inverse_K.dot(center_point) * center_depth
+
+        return center_point_camera
+
 
     def callback(self, data):
         """adapted from yolov5/detect.py"""
@@ -216,14 +244,14 @@ class Yolov5Detector:
                 x_center = int((xyxy[0] + xyxy[2]) / 2)
                 y_center = int((xyxy[1] + xyxy[3]) / 2)
 
-                #min_val = min(abs(xyxy[2] - xyxy[0]), abs(xyxy[3] - xyxy[1]))
+                # min_val = min(abs(xyxy[2] - xyxy[0]), abs(xyxy[3] - xyxy[1]))
 
                 # Add depth information to the bounding box
                 if self.depth_image is not None:
                     distance_bbc = self.depth_image[int (y_center), int (x_center)]
-                #    distance_bbc = self.filter(x_center, y_center, min_val, 24)
-                    bounding_box.distance = float ((distance_bbc) / 645)
-
+                    # distance_bbc = self.filter(x_center, y_center, min_val, 24)
+                    bounding_box.distance = float (distance_bbc)
+                    center_camera = convert_to_camera_coordinates(bounding_box.distance, x_center, y_center)
                 # Fill in bounding box message
                 bounding_box.Class = self.names[c]
                 bounding_box.probability = conf 
@@ -258,7 +286,7 @@ class Yolov5Detector:
             self.image_pub.publish(self.bridge.cv2_to_imgmsg(im0, "bgr8"))
             self.color_image = im0            
     
-        
+
 
 if __name__ == "__main__":
 

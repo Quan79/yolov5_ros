@@ -30,6 +30,8 @@
     <arg name="publish_image" default="ture"/>
     <arg name="output_image_topic" default="/yolov5/image_out"/>
 
+    <!--camera info topic-->
+    <arg name="camera_info" default="..."/>
 
     <node pkg="yolov5_ros" name="detect" type="detect.py" output="screen">
         <param name="weights" value="$(arg weights)"/>
@@ -57,6 +59,8 @@
 
         <param name="publish_image" value="$(arg publish_image)"/>
         <param name="output_image_topic" value="$(arg output_image_topic)"/>
+
+        <param name="camera_info_topic" value="$(arg camera_info)/">
     </node>
     <!-- <include file="$(find camera_launch)/launch/d435.launch"/> -->
 
