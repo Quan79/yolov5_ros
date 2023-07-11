@@ -133,7 +133,7 @@ class Yolov5Detector:
             self.depth_image = np.nan_to_num(self.depth_image)  # Replace NaN values with 0
                 
             # Apply depth image preprocessing
-            self.depth_image = preprocess_depth_image(self.depth_image)
+            self.depth_image = self.preprocess_depth_image(self.depth_image)
 
         except CvBridgeError as e:
             rospy.logerr('Error converting depth image: {}'.format(e))
@@ -251,7 +251,7 @@ class Yolov5Detector:
                     distance_bbc = self.depth_image[int (y_center), int (x_center)]
                     # distance_bbc = self.filter(x_center, y_center, min_val, 24)
                     bounding_box.distance = float (distance_bbc)
-                    center_camera = convert_to_camera_coordinates(bounding_box.distance, x_center, y_center)
+                    center_camera = self.convert_to_camera_coordinates(bounding_box.distance, x_center, y_center)
                 # Fill in bounding box message
                 bounding_box.Class = self.names[c]
                 bounding_box.probability = conf 

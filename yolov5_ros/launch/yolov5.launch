@@ -31,7 +31,7 @@
     <arg name="output_image_topic" default="/yolov5/image_out"/>
 
     <!--camera info topic-->
-    <arg name="camera_info" default="..."/>
+    <arg name="camera_info" default="/camera_front/color/camera_info"/>
 
     <node pkg="yolov5_ros" name="detect" type="detect.py" output="screen">
         <param name="weights" value="$(arg weights)"/>
