@@ -8,6 +8,7 @@ import numpy as np
 import os
 import sys
 import random
+import pyrealsense2 as rs
 from cv_bridge import CvBridge
 from pathlib import Path
 from rostopic import get_topic_type
@@ -89,10 +90,9 @@ class Yolov5Detector:
                 input_image_topic, Image, self.callback, queue_size=10
             )
 
-        #Initialize subscriber to depth image topic 初始化订阅深度图像，
-        #此处LAUNCH文件需要修改
+        #Initialize subscriber to depth image topic 
         input_depth_type, input_depth_topic, _ = get_topic_type(rospy.get_param("~depth_image_topic"), blocking = True)
-        #print(input_depth_type)
+
         self.depth_image_sub = rospy.Subscriber(
             input_depth_topic, Image, self.depth_callback, queue_size=10
         )
@@ -220,9 +220,11 @@ class Yolov5Detector:
 
                 # Add depth information to the bounding box
                 if self.depth_image is not None:
-                    distance_bbc = self.depth_image[int (y_center), int (x_center)]
+                    aligned_frame = rs.align.process(data, self.depth_image)
+                    aligned_depth_frame = aligned_frame.get_depth_frame()
+                    distance_bbc = aligned_depth_frame[int (y_center), int (x_center)]
                 #    distance_bbc = self.filter(x_center, y_center, min_val, 24)
-                    bounding_box.distance = float ((distance_bbc) / 645)
+                    bounding_box.distance = float (distance_bbc)
 
                 # Fill in bounding box message
                 bounding_box.Class = self.names[c]
