@@ -8,7 +8,6 @@ import numpy as np
 import os
 import sys
 import random
-import pyrealsense2 as rs
 from cv_bridge import CvBridge
 from pathlib import Path
 from rostopic import get_topic_type
@@ -220,9 +219,7 @@ class Yolov5Detector:
 
                 # Add depth information to the bounding box
                 if self.depth_image is not None:
-                    aligned_frame = rs.align.process(im0, self.depth_image)
-                    aligned_depth_frame = aligned_frame.get_depth_frame()
-                    distance_bbc = aligned_depth_frame[int (y_center), int (x_center)]
+                    distance_bbc = self.depth_image[int (y_center), int (x_center)]
                 #    distance_bbc = self.filter(x_center, y_center, min_val, 24)
                     bounding_box.distance = float (distance_bbc)
 
