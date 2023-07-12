@@ -27,7 +27,7 @@
     <arg name="depth_output_topic" default="/yolov5/depth_img"/>    
 
     <!--find controller topic-->
-    <arg name="controller_topic" default="/anicar/vesc/commands/motor/break"/>
+    <arg name="controller_topic" default="/anicar/vesc/commands/motor/unsmoothed_speed"/>
 
     <!-- Optional topic (publishing annotated image) -->
     <arg name="publish_image" default="ture"/>

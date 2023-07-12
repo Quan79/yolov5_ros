@@ -12,7 +12,7 @@ import time
 from cv_bridge import CvBridge
 from pathlib import Path
 from rostopic import get_topic_type
-import std_msgs
+from std_msgs.msg import Float64
 from sensor_msgs.msg import Image, CompressedImage
 from detection_msgs.msg import BoundingBox, BoundingBoxes
 
@@ -106,7 +106,7 @@ class Yolov5Detector:
 
         # Initialize controller publisher
         self.controller_pub = rospy.Publisher(
-            rospy.get_param("~controller_topic"), std_msgs, queue_size=10
+            rospy.get_param("~controller_topic"), Float64, queue_size=10
         )
 
         # Initialize image publisher
@@ -129,6 +129,7 @@ class Yolov5Detector:
         self.bridge = CvBridge()
         self.color_image = None
         self.depth_image = None
+        self.c = None
         
      #深度callback函数
     def depth_callback(self, depth_image):
@@ -217,7 +218,7 @@ class Yolov5Detector:
             # Write results
             for *xyxy, conf, cls in reversed(det):
                 bounding_box = BoundingBox()
-                c = int(cls)
+                self.c = int(cls)
 
                 # Calculate the center of the bounding box
                 x_center = int((xyxy[0] + xyxy[2]) / 2)
@@ -227,26 +228,31 @@ class Yolov5Detector:
 
                 # Add depth information to the bounding box
                 if self.depth_image is not None:
-                    distance_bbc = self.depth_image[int (y_center), int (x_center)]
+                    self.distance_bbc = self.depth_image[int (y_center), int (x_center)]
                 #    distance_bbc = self.filter(x_center, y_center, min_val, 24)
-                    bounding_box.distance = float (distance_bbc)
+                    bounding_box.distance = float (self.distance_bbc)
+
+                if self.c == 0:
+                     if self.distance_bbc < 500:
+                            brk = 0
+                            self.controller_pub.publish(float(brk))
 
                 # Fill in bounding box message
-                bounding_box.Class = self.names[c]
+                bounding_box.Class = self.names[self.c]
                 bounding_box.probability = conf 
                 bounding_box.xmin = int(xyxy[0])
                 bounding_box.ymin = int(xyxy[1])
                 bounding_box.xmax = int(xyxy[2])
                 bounding_box.ymax = int(xyxy[3])
-
+ 
                 #
                 bounding_boxes.bounding_boxes.append(bounding_box)
 
                 # Annotate the image
                 if self.publish_image or self.view_image:  # Add bbox to image
                       # integer class
-                    label = f"{self.names[c]} {conf:.2f} {bounding_box.distance}"
-                    annotator.box_label(xyxy, label, color=colors(c, True))     
+                    label = f"{self.names[self.c]} {conf:.2f} {bounding_box.distance}"
+                    annotator.box_label(xyxy, label, color=colors(self.c, True))     
 
                 
                 ### POPULATE THE DETECTION MESSAGE HERE
@@ -281,13 +287,14 @@ if __name__ == "__main__":
     #     return seconds
 
     # # Check stop sign
-    # if c == 0:
-    #     if distance_bbc < 700:
+    # if detector.c == 0:
+    #     if detector.distance_bbc < 700:
     #         brk = 0
-    #         self.controller_pub.publish(float(brk))
-    #         seconds = 5
-    #         self.countdown_timer(seconds)
-    #         if seconds == 0:
-    #             self.controller_pub.publish(float(brk))
+    #         detector.controller_pub.publish(float(brk))
+    #         # seconds = 5
+    #         # detector.countdown_timer(seconds)
+    #         # if seconds == 0:
+    #         #     brk = 1
+    #         #     detector.controller_pub.publish(float(brk))
     
     rospy.spin()
