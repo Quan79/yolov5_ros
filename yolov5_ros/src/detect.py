@@ -8,10 +8,11 @@ import numpy as np
 import os
 import sys
 import random
-import pyrealsense2 as rs
+import time
 from cv_bridge import CvBridge
 from pathlib import Path
 from rostopic import get_topic_type
+import std_msgs
 from sensor_msgs.msg import Image, CompressedImage
 from detection_msgs.msg import BoundingBox, BoundingBoxes
 
@@ -98,10 +99,16 @@ class Yolov5Detector:
         )
 
 
-        # Initialize prediction publisher 建立预测的话题发布，消息类型为boundingboxes
+        # Initialize prediction publisher 
         self.pred_pub = rospy.Publisher(
             rospy.get_param("~output_topic"), BoundingBoxes, queue_size=10
         )
+
+        # Initialize controller publisher
+        self.controller_pub = rospy.Publisher(
+            rospy.get_param("~controller_topic"), std_msgs, queue_size=10
+        )
+
         # Initialize image publisher
         self.publish_image = rospy.get_param("~publish_image")
         if self.publish_image:
@@ -164,8 +171,8 @@ class Yolov5Detector:
         #重新构造一个连续数组img
         img = np.ascontiguousarray(img)
 
-        return img, img0 
-    
+        return img, img0
+
 
     def callback(self, data):
         """adapted from yolov5/detect.py"""
@@ -220,9 +227,7 @@ class Yolov5Detector:
 
                 # Add depth information to the bounding box
                 if self.depth_image is not None:
-                    aligned_frame = rs.align.process(im0, self.depth_image)
-                    aligned_depth_frame = aligned_frame.get_depth_frame()
-                    distance_bbc = aligned_depth_frame[int (y_center), int (x_center)]
+                    distance_bbc = self.depth_image[int (y_center), int (x_center)]
                 #    distance_bbc = self.filter(x_center, y_center, min_val, 24)
                     bounding_box.distance = float (distance_bbc)
 
@@ -268,5 +273,21 @@ if __name__ == "__main__":
     
     rospy.init_node("yolov5", anonymous=True)
     detector = Yolov5Detector()
+
+    # def countdown_timer(seconds):
+    #     while seconds > 0:
+    #         time.sleep(1)
+    #         seconds -= 1
+    #     return seconds
+
+    # # Check stop sign
+    # if c == 0:
+    #     if distance_bbc < 700:
+    #         brk = 0
+    #         self.controller_pub.publish(float(brk))
+    #         seconds = 5
+    #         self.countdown_timer(seconds)
+    #         if seconds == 0:
+    #             self.controller_pub.publish(float(brk))
     
     rospy.spin()

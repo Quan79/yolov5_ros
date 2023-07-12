@@ -26,9 +26,12 @@
     <arg name="depth_image_topic" default="/camera_front/depth/image_rect_raw"/>
     <arg name="depth_output_topic" default="/yolov5/depth_img"/>    
 
+    <!--find controller topic-->
+    <arg name="controller_topic" default="/anicar/vesc/commands/motor/break"/>
+
     <!-- Optional topic (publishing annotated image) -->
     <arg name="publish_image" default="ture"/>
-    <arg name="output_image_topic" default="/yolov5/image_out"/>
+    <!-- <arg name="output_image_topic" default="/yolov5/image_out"/> -->
 
 
     <node pkg="yolov5_ros" name="detect" type="detect.py" output="screen">
@@ -52,11 +55,12 @@
         <param name="depth_image_topic" value="$(arg depth_image_topic)"/>
         <param name="depth_output_topic" value="$(arg depth_output_topic)"/>
 
+        <param name="controller_topic" value="$(arg controller_topic)"/>
 
         <param name="view_image" value="$(arg view_image)"/>
 
         <param name="publish_image" value="$(arg publish_image)"/>
-        <param name="output_image_topic" value="$(arg output_image_topic)"/>
+        <!-- <param name="output_image_topic" value="$(arg output_image_topic)"/> -->
     </node>
     <!-- <include file="$(find camera_launch)/launch/d435.launch"/> -->
 
