@@ -7,22 +7,22 @@ import torch.backends.cudnn as cudnn
 import numpy as np
 import os
 import sys
-import random
-import time
 from cv_bridge import CvBridge
-from pathlib import Path
+import pathlib
 from rostopic import get_topic_type
-import std_msgs
-from sensor_msgs.msg import Image, CompressedImage
+from std_msgs.msg import Float64
+from sensor_msgs.msg import Image, CompressedImage, CameraInfo
 from detection_msgs.msg import BoundingBox, BoundingBoxes
 
+from nav_msgs.msg import Path
+from geometry_msgs.msg import PoseStamped
 
 # add yolov5 submodule to path
-FILE = Path(__file__).resolve()
+FILE = pathlib.Path(__file__).resolve()
 ROOT = FILE.parents[0] / "yolov5"
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
-ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative path
+ROOT = pathlib.Path(os.path.relpath(ROOT, pathlib.Path.cwd()))  # relative path
 
 # import from yolov5 submodules
 from models.common import DetectMultiBackend
@@ -47,7 +47,7 @@ class Yolov5Detector:
         self.classes = rospy.get_param("~classes", None)
         self.line_thickness = rospy.get_param("~line_thickness")
         self.view_image = rospy.get_param("~view_image")
-        # Initialize weights 
+        # Initialize weights
         weights = rospy.get_param("~weights")
         # Initialize model
         self.device = select_device(str(rospy.get_param("~device","")))
@@ -74,13 +74,11 @@ class Yolov5Detector:
             self.model.model.half() if self.half else self.model.model.float()
         bs = 1  # batch_size
         cudnn.benchmark = True  # set True to speed up constant image size inference
-        self.model.warmup()  # warmup        
-        
+        self.model.warmup()  # warmup
+
         # Initialize subscriber to Image/CompressedImage topic
-        # 初始化订阅输入图像话题，获取topic type， topic name
         input_image_type, input_image_topic, _ = get_topic_type(rospy.get_param("~input_image_topic"), blocking = True)
-        #判断这个input_image_type是不是compressedimage类型的消息
-        self.compressed_input = input_image_type == "sensor_msgs/CompressedImage" 
+        self.compressed_input = input_image_type == "sensor_msgs/CompressedImage"
 
         if self.compressed_input:
             self.image_sub = rospy.Subscriber(
@@ -91,87 +89,72 @@ class Yolov5Detector:
                 input_image_topic, Image, self.callback, queue_size=10
             )
 
-        #Initialize subscriber to depth image topic 
+        #Initialize subscriber to depth image topic
         input_depth_type, input_depth_topic, _ = get_topic_type(rospy.get_param("~depth_image_topic"), blocking = True)
 
         self.depth_image_sub = rospy.Subscriber(
             input_depth_topic, Image, self.depth_callback, queue_size=10
         )
 
-
-        # Initialize prediction publisher 
-        self.pred_pub = rospy.Publisher(
-            rospy.get_param("~output_topic"), BoundingBoxes, queue_size=10
+        depth_camera_info_topic = rospy.get_param(
+            '~depth_camera_info_topic', '/camera_front/depth/camera_info'
+        )
+        color_camera_info_topic = rospy.get_param(
+            '~color_camera_info_topic', '/camera_front/color/camera_info'
         )
 
+        #camera_info subscribe
+        self.camera_info_color_sub = rospy.Subscriber(color_camera_info_topic, CameraInfo, self.camera_info_color_callback)
+
+        #camera_info subscribe
+        self.camera_info_depth_sub = rospy.Subscriber(depth_camera_info_topic, CameraInfo, self.camera_info_depth_callback)
+
+        # Initialize prediction publisher
+        self.pred_pub = rospy.Publisher(
+            rospy.get_param("~output_topic"), BoundingBoxes, queue_size=1
+        )
+        self.aligned_pub = rospy.Publisher('/yolov5/depth_image',  Image, queue_size=1)
         # Initialize controller publisher
         self.controller_pub = rospy.Publisher(
-            rospy.get_param("~controller_topic"), std_msgs, queue_size=10
+            rospy.get_param("~controller_topic"), Float64, queue_size=1
         )
+
+        self.cones_pub = rospy.Publisher(
+            "/cones_position",  Path, queue_size=1)
 
         # Initialize image publisher
         self.publish_image = rospy.get_param("~publish_image")
+
         if self.publish_image:
             self.image_pub = rospy.Publisher(
-                rospy.get_param("~depth_output_topic"), Image, queue_size=10
+                rospy.get_param("~prediction"), Image, queue_size=10
             )
-        
-        """ 如果已经存在相机的深度图publisher应该不需要写这一部分，不确定，可能也需要一个publisher发布带框的深度图
-        #Initialize depth publisher
-        self.publish_depth_image = rospy.get_param("~publish_depth_image")
-        if self.publish_depth_image:
-            self.depth_pub = rospy.Publisher(
-                rospy.get_param("~output_depth_image"), Image, queue_size=10
-            )
-        """
-        
+        # self.cones_pub = rospy.Publisher(
+        #     "/cones_position",  Path, queue_size=1)
+
+
         # Initialize CV_Bridge
         self.bridge = CvBridge()
-        self.color_image = None
-        self.depth_image = None
-        
-     #深度callback函数
-    def depth_callback(self, depth_image):
-        try:
-            # Convert depth image to numpy array
-            cv_depth_image = self.bridge.imgmsg_to_cv2(depth_image, desired_encoding='passthrough')
-            self.depth_image = np.array(cv_depth_image, dtype=np.float64)
-            self.depth_image = np.nan_to_num(self.depth_image)  # Replace NaN values with 0
-        except CvBridgeError as e:
-            rospy.logerr('Error converting depth image: {}'.format(e))
-            return  
-           
+        self.color_image = Image()
+        self.depth_image = Image()
+        self.camera_info_depth = CameraInfo()
+        self.camera_info_color = CameraInfo()
 
-#    def filter(self, x, y, min_val, randnum):
-#        distance_list = []
-#        #mid_pos = [(box[0] + box[2])//2, (box[1] + box[3])//2] #确定索引深度的中心像素位置
-#        #min_val = min(abs(box[2] - box[0]), abs(box[3] - box[1])) #确定深度搜索范围
-#        #print(box)
-#        for i in range(randnum):
-#            bias = random.randint(-min_val//4, min_val//4)
-#            dist = self.depth_image[int(y + bias), int(x + bias)]
-#            if dist:
-#                distance_list.append(dist)
-#        distance_list = np.array(distance_list)
-#        distance_list = np.sort(distance_list)[randnum//2-randnum//4:randnum//2+randnum//4] #冒泡排序+中值滤波
-#    #print(distance_list, np.mean(distance_list))
-#        distance = np.mean(distance_list)
-#        return distance
+    def depth_callback(self, depth_image_msg):
+
+        depth_image = self.bridge.imgmsg_to_cv2(depth_image_msg, desired_encoding="passthrough")
+
+        aligned_depth_image = self.align_depth_to_color(depth_image, self.camera_info_depth, self.camera_info_color)
+        self.depth_image = aligned_depth_image
+
+        self.aligned_pub.publish(self.bridge.cv2_to_imgmsg(self.depth_image, "passthrough"))
 
 
-    def preprocess(self, img):
-        """
-        Adapted from yolov5/utils/datasets.py LoadStreams class
-        """
-        img0 = img.copy()
-        #取letterbox返回的第一个值，即img，转换成np数组
-        img = np.array([letterbox(img, self.img_size, stride=self.stride, auto=self.pt)[0]]) 
-        # Convert
-        img = img[..., ::-1].transpose((0, 3, 1, 2))  # BGR to RGB, BHWC to BCHW
-        #重新构造一个连续数组img
-        img = np.ascontiguousarray(img)
+    def camera_info_depth_callback(self, camera_info_depth_msg):
+        self.camera_info_depth = camera_info_depth_msg
 
-        return img, img0
+    def camera_info_color_callback(self, camera_info_color_msg):
+        self.camera_info_color = camera_info_color_msg
 
 
     def callback(self, data):
@@ -181,14 +164,14 @@ class Yolov5Detector:
             im = self.bridge.compressed_imgmsg_to_cv2(data, desired_encoding="bgr8")
         else:
             im = self.bridge.imgmsg_to_cv2(data, desired_encoding="bgr8")
-        
+
         im, im0 = self.preprocess(im)
         # print(im.shape)
         # print(img0.shape)
         # print(img.shape)
 
         # Run inference
-        im = torch.from_numpy(im).to(self.device) 
+        im = torch.from_numpy(im).to(self.device)
         im = im.half() if self.half else im.float()
         im /= 255
         if len(im.shape) == 3:
@@ -200,55 +183,72 @@ class Yolov5Detector:
         )
 
         ### To-do move pred to CPU and fill BoundingBox messages
-        
-        # Process predictions 
+
+        # Process predictions
         det = pred[0].cpu().numpy()
 
         bounding_boxes = BoundingBoxes()
         bounding_boxes.header = data.header
         bounding_boxes.image_header = data.header
-        
+
         annotator = Annotator(im0, line_width=self.line_thickness, example=str(self.names))
+
+        cones_msg = Path()
+        current_time = rospy.Time.now()
+        cones_msg.header.stamp = current_time
+        cones_msg.header.frame_id = "vehicle_frame"
+
+
         if len(det):
             # Rescale boxes from img_size to im0 size
-            # 将Boundingboxes 恢复到原始图像im0的尺寸
             det[:, :4] = scale_coords(im.shape[2:], det[:, :4], im0.shape).round()
 
             # Write results
             for *xyxy, conf, cls in reversed(det):
                 bounding_box = BoundingBox()
-                c = int(cls)
+                self.c = int(cls)
 
                 # Calculate the center of the bounding box
                 x_center = int((xyxy[0] + xyxy[2]) / 2)
                 y_center = int((xyxy[1] + xyxy[3]) / 2)
 
-                #min_val = min(abs(xyxy[2] - xyxy[0]), abs(xyxy[3] - xyxy[1]))
 
                 # Add depth information to the bounding box
                 if self.depth_image is not None:
-                    distance_bbc = self.depth_image[int (y_center), int (x_center)]
-                #    distance_bbc = self.filter(x_center, y_center, min_val, 24)
-                    bounding_box.distance = float (distance_bbc)
+                    self.distance_bbc = self.depth_image[int (y_center), int (x_center)]
+                    bounding_box.distance = float (self.distance_bbc)
+
+                # if self.c == 0:
+                #      if self.distance_bbc < 500:
+                #             brk = 0
+                #             self.controller_pub.publish(float(brk))
 
                 # Fill in bounding box message
-                bounding_box.Class = self.names[c]
-                bounding_box.probability = conf 
+                bounding_box.Class = self.names[self.c]
+                bounding_box.probability = conf
                 bounding_box.xmin = int(xyxy[0])
                 bounding_box.ymin = int(xyxy[1])
                 bounding_box.xmax = int(xyxy[2])
                 bounding_box.ymax = int(xyxy[3])
 
+
+                pose_stamped = PoseStamped()
+                cones_msg.header.stamp = current_time
+                cones_msg.header.frame_id = "vehicle_frame"
+                pose_stamped.pose.position.z = bounding_box.distance /1000
+                pose_stamped.pose.position.x = (x_center -638.79 )/645.7 * pose_stamped.pose.position.z
+                pose_stamped.pose.position.y = (y_center -352.38 )/645.7 * pose_stamped.pose.position.z
+                cones_msg.poses.append(pose_stamped)
                 #
                 bounding_boxes.bounding_boxes.append(bounding_box)
 
                 # Annotate the image
                 if self.publish_image or self.view_image:  # Add bbox to image
                       # integer class
-                    label = f"{self.names[c]} {conf:.2f} {bounding_box.distance}"
-                    annotator.box_label(xyxy, label, color=colors(c, True))     
+                    label = f"{self.names[self.c]} {conf:.2f}"
+                    annotator.box_label(xyxy, label, color=colors(self.c, True))
 
-                
+
                 ### POPULATE THE DETECTION MESSAGE HERE
 
             # Stream results
@@ -256,6 +256,7 @@ class Yolov5Detector:
 
         # Publish prediction
         self.pred_pub.publish(bounding_boxes)
+        self.cones_pub.publish(cones_msg)
 
         # Publish & visualize images
         if self.view_image:
@@ -263,15 +264,49 @@ class Yolov5Detector:
             cv2.waitKey(1)  # 1 millisecond
         if self.publish_image:
             self.image_pub.publish(self.bridge.cv2_to_imgmsg(im0, "bgr8"))
-            self.color_image = im0            
-    
-        
+            self.color_image = im0
+
+
+    def align_depth_to_color(self, depth_image, camera_info_depth, camera_info_color):
+        # 获取相机内参
+        K_depth = np.array(camera_info_depth.K).reshape(3, 3)
+        K_color = np.array(camera_info_color.K).reshape(3, 3)
+
+        D_depth = np.array(camera_info_depth.D)
+        D_color = np.array(camera_info_color.D)
+
+        R_depth = np.array(camera_info_depth.R).reshape(3, 3)
+        R_color = np.array(camera_info_color.R).reshape(3, 3)
+
+        P_depth = np.array(camera_info_depth.P).reshape(3, 4)
+        P_color = np.array(camera_info_color.P).reshape(3, 4)
+
+        # 计算对齐映射
+        map_x, map_y = cv2.initUndistortRectifyMap(K_depth, D_depth, R_depth, K_color, depth_image.shape[::-1], cv2.CV_32FC1)
+        aligned_depth_image = cv2.remap(depth_image, map_x, map_y, cv2.INTER_LINEAR)
+
+        return aligned_depth_image
+
+    def preprocess(self, img):
+        """
+        Adapted from yolov5/utils/datasets.py LoadStreams class
+        """
+        img0 = img.copy()
+        img = np.array([letterbox(img, self.img_size, stride=self.stride, auto=self.pt)[0]])
+        # Convert
+        img = img[..., ::-1].transpose((0, 3, 1, 2))  # BGR to RGB, BHWC to BCHW
+        img = np.ascontiguousarray(img)
+
+        return img, img0
+
+
 
 if __name__ == "__main__":
 
     check_requirements(exclude=("tensorboard", "thop"))
-    
+
     rospy.init_node("yolov5", anonymous=True)
+    # rospy.Rate(50)
     detector = Yolov5Detector()
 
     # def countdown_timer(seconds):
@@ -281,13 +316,14 @@ if __name__ == "__main__":
     #     return seconds
 
     # # Check stop sign
-    # if c == 0:
-    #     if distance_bbc < 700:
+    # if detector.c == 0:
+    #     if detector.distance_bbc < 700:
     #         brk = 0
-    #         self.controller_pub.publish(float(brk))
-    #         seconds = 5
-    #         self.countdown_timer(seconds)
-    #         if seconds == 0:
-    #             self.controller_pub.publish(float(brk))
-    
+    #         detector.controller_pub.publish(float(brk))
+    #         # seconds = 5
+    #         # detector.countdown_timer(seconds)
+    #         # if seconds == 0:
+    #         #     brk = 1
+    #         #     detector.controller_pub.publish(float(brk))
+
     rospy.spin()
