@@ -11,6 +11,7 @@ from cv_bridge import CvBridge
 import pathlib
 from rostopic import get_topic_type
 from std_msgs.msg import Float64
+from std_msgs.msg import Float64MultiArray
 from sensor_msgs.msg import Image, CompressedImage, CameraInfo
 from detection_msgs.msg import BoundingBox, BoundingBoxes
 
@@ -121,6 +122,10 @@ class Yolov5Detector:
 
         self.cones_pub = rospy.Publisher(
             "/cones_position",  Path, queue_size=1)
+        
+        self.stop_pub = rospy.Publisher(
+            "/stop_sgin", Float64MultiArray, queue_size=1
+        )
 
         # Initialize image publisher
         self.publish_image = rospy.get_param("~publish_image")
@@ -217,6 +222,12 @@ class Yolov5Detector:
                 if self.depth_image is not None:
                     self.distance_bbc = self.depth_image[int (y_center), int (x_center)]
                     bounding_box.distance = float (self.distance_bbc)
+
+                # Add stop sign output topic 
+                stop_sign = Float64MultiArray()
+                stop_sign.layout = self.c
+                stop_sign.data = self.distance_bbc
+                self.stop_pub.publish(stop_sign)
 
                 # if self.c == 0:
                 #      if self.distance_bbc < 500:
